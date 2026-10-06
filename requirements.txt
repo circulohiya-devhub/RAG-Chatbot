@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+requests
+langchain
+langchain-google-genai
+langchain-text-splitters
+langgraph
+langgraph-checkpoint-sqlite
