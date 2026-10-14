@@ -37,7 +37,7 @@ REFRESH_SECONDS = int(os.getenv("REFRESH_SECONDS", "60"))
 # Edit these for your hotel
 HOTEL_NAME = "Casa Alon Hotel"
 FRONT_DESK = "+63 917 000 0000"
-MANAGEMENT_EMAIL = "management@casaalonhotel.ph"
+MANAGEMENT_EMAIL = "circulohiya@gmail.com"
 HOTEL_TIMEZONE = ZoneInfo("Asia/Manila")
 MAX_NIGHTS = 30
 
