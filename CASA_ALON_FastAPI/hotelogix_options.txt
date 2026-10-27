@@ -1,0 +1,77 @@
+{
+  "title": "Roomin",
+  "currentNightAuditDate": "2025-05-10",
+  "websettings": {
+    "isopenaddoninpopup": "1",
+    "isbookbycc": "1",
+    "isbookbycq": "1",
+    "isbookbycqbt": "1",
+    "isbookbyfax": null,
+    "payModeDetails": {
+      "ccard": {
+        "status": "RESERVE",
+        "releasetime": "0",
+        "releasetype": "",
+        "message": ""
+      },
+      "cheque": {
+        "status": "BLOCKED",
+        "releasetime": "0",
+        "releasetype": "0 MINUTE",
+        "message": ""
+      },
+      "bank": {
+        "status": "BLOCKED",
+        "releasetime": "0",
+        "releasetype": "0 MINUTE",
+        "message": ""
+      },
+      "fax": {
+        "status": "BLOCKED",
+        "releasetime": "0",
+        "releasetype": "0 MINUTE",
+        "message": ""
+      }
+    },
+    "header": "",
+    "footer": "Looking forward to your arrival!",
+    "webTC": "No pets allowed",
+    "enbServer": "",
+    "redirectUrl": "",
+    "trpRedirectUrl": "",
+    "maxBookingAllowed": "0",
+    "maxSearchPerson": "0",
+    "minNoNight": "1",
+    "maxNoNight": "10"
+  },
+  "other_keys": [
+    "businesssources",
+    "checkInTime",
+    "chrgNoShowAfter",
+    "conversionrate",
+    "convertionmargin",
+    "countryISO2",
+    "currencycode",
+    "currentDate",
+    "decimalplace",
+    "description",
+    "guesttypes",
+    "hotelMode",
+    "id",
+    "isTrialExpired",
+    "langcode",
+    "logo",
+    "marketsegments",
+    "noShowChrgTime",
+    "noShowChrgTimeType",
+    "salepersons",
+    "status",
+    "symbol",
+    "taxCode",
+    "taxCodeTitle",
+    "timeFormat",
+    "timeZone",
+    "timeZoneDiff",
+    "webSite"
+  ]
+}

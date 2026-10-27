@@ -1,8 +1,10 @@
 """
 Live rates, availability, and promos from the hotel's PMS.
 
-The agent never talks to the PMS directly. It calls two READ-ONLY tools in rag.py,
-which call get_client() here. The bot cannot create, change, or cancel bookings.
+The agent never talks to the PMS directly. It calls tools in rag.py, which call
+get_client() here. Rate searches are read-only. Reservations are created only by
+create_reservation(), after the guest has confirmed a summary (see rag.py). The bot
+cannot change or cancel reservations.
 
 PMS_PROVIDER in .env picks the source:
   mock       sample data for testing without any API (default)
@@ -24,6 +26,9 @@ import requests
 log = logging.getLogger("pms")
 
 CACHE_SECONDS = int(os.getenv("PMS_CACHE_SECONDS", "300"))  # reuse identical searches for 5 minutes
+# false (default): the bot only saves reservations ON HOLD, and staff confirm them in the PMS.
+# true: the bot also confirms them (payment type "Other", no payment).
+CONFIRM_BOOKINGS = os.getenv("HOTELOGIX_CONFIRM_BOOKINGS", "false").lower() == "true"
 
 
 class PMSError(Exception):
@@ -40,6 +45,8 @@ class RoomOffer:
     rooms_left: int | None = None
     inclusions: str = ""        # e.g. "Breakfast for 2"
     cancellation: str = ""      # e.g. "Free cancellation until 72 hours before arrival"
+    deposit: float | None = None  # amount needed to confirm the booking, if the PMS reports it
+    rate_id: str = ""           # PMS id of this rate, used to reserve it (never shown to guests)
 
 
 @dataclass
@@ -51,6 +58,37 @@ class Promo:
     conditions: str = ""
 
 
+class PriceChangedError(PMSError):
+    """The price changed between the summary the guest saw and the booking."""
+
+    def __init__(self, new_total: float, currency: str):
+        super().__init__(f"price changed to {currency} {new_total:,.2f}")
+        self.new_total, self.currency = new_total, currency
+
+
+class NotAvailableError(PMSError):
+    """The room is no longer available for those dates."""
+
+
+@dataclass
+class Guest:
+    first_name: str
+    last_name: str
+    email: str
+    mobile: str
+
+
+@dataclass
+class ReservationResult:
+    status: str                 # "ON_HOLD" (saved, staff confirm it) or "CONFIRMED"
+    order_id: str
+    reservation_codes: list
+    room_type: str
+    rate_plan: str
+    total_price: float
+    currency: str
+
+
 class PMSClient(ABC):
     @abstractmethod
     def search(self, check_in: date, check_out: date, adults: int, children: int) -> list[RoomOffer]:
@@ -59,6 +97,53 @@ class PMSClient(ABC):
     @abstractmethod
     def promos(self) -> list[Promo]:
         """Promos currently bookable."""
+
+    def create_reservation(self, check_in: date, check_out: date, adults: int, children: int,
+                           room_type: str, expected_total: float, guest: Guest,
+                           channel: str = "") -> ReservationResult:
+        """Reserve one room. Re-checks price and availability first."""
+        raise PMSError("Reservations are not supported by this PMS provider")
+
+
+def _pick_offer(offers: list[RoomOffer], room_type: str) -> RoomOffer | None:
+    """The cheapest offer for the requested room type (case-insensitive)."""
+    wanted = room_type.strip().lower()
+    matches = [o for o in offers if o.room_type.lower() == wanted]
+    if not matches:
+        matches = [o for o in offers if wanted in o.room_type.lower() or o.room_type.lower() in wanted]
+    return min(matches, key=lambda o: o.total_price) if matches else None
+
+
+def _find_order(response: dict) -> tuple[str, list]:
+    """Order id and reservation codes from a savebooking/confirmbooking response.
+    Looks in the documented place first, then anywhere in the response."""
+    order = response.get("order") if isinstance(response.get("order"), dict) else {}
+    order_id = order.get("id")
+    if isinstance(order_id, dict):
+        order_id = order_id.get("value")
+    codes = [b.get("code") for b in order.get("bookings") or [] if isinstance(b, dict) and b.get("code")]
+    if not order_id:
+        def walk(x):
+            if isinstance(x, dict):
+                for k, v in x.items():
+                    if isinstance(v, str) and (v.startswith("CRS-") or k.lower() in ("orderid", "order_id")):
+                        return v
+                    found = walk(v)
+                    if found:
+                        return found
+            elif isinstance(x, list):
+                for v in x:
+                    found = walk(v)
+                    if found:
+                        return found
+            return None
+        order_id = walk(response)
+    return (str(order_id) if order_id else ""), codes
+
+
+def _check_price(offer: RoomOffer, expected_total: float) -> None:
+    if abs(offer.total_price - expected_total) > 1:
+        raise PriceChangedError(offer.total_price, offer.currency)
 
 
 # ------------------------------------------------------------------
@@ -95,6 +180,18 @@ class MockPMS(PMSClient):
                 cancellation="Free cancellation until 72 hours before arrival",
             ))
         return [o for o in offers if o.rooms_left]
+
+    def create_reservation(self, check_in, check_out, adults, children, room_type, expected_total, guest,
+                           channel=""):
+        offer = _pick_offer(self.search(check_in, check_out, adults, children), room_type)
+        if not offer:
+            raise NotAvailableError(room_type)
+        _check_price(offer, expected_total)
+        code = f"MOCK-{int(time.time()) % 1000000:06d}"
+        status = "CONFIRMED" if CONFIRM_BOOKINGS else "ON_HOLD"
+        log.info("MOCK reservation %s (%s) for %s %s", code, status, guest.first_name, guest.last_name)
+        return ReservationResult(status, code, [code], offer.room_type, offer.rate_plan,
+                                 offer.total_price, offer.currency)
 
     def promos(self):
         return [
@@ -137,6 +234,23 @@ class HotelogixClient(PMSClient):
         allowed = os.getenv("HOTELOGIX_RATE_TYPES", "").strip()
         self.allowed_rate_types = {t.strip().upper() for t in allowed.split(",") if t.strip()}
         self.debug = os.getenv("HOTELOGIX_DEBUG", "false").lower() == "true"
+        # Reservations
+        # Booking classification. Values must match the property's setup exactly:
+        # list them with get_hotel_options() (see README).
+        self.business_source = os.getenv("HOTELOGIX_BUSINESS_SOURCE", "").strip()
+        self.market_segment = os.getenv("HOTELOGIX_MARKET_SEGMENT", "").strip()
+        self.guest_type = os.getenv("HOTELOGIX_GUEST_TYPE", "").strip()
+        self.salesperson = os.getenv("HOTELOGIX_SALESPERSON", "").strip()
+        # Business source per chat channel, e.g. "facebook=FB,web=Web,instagram=IG".
+        # Channels not listed use HOTELOGIX_BUSINESS_SOURCE.
+        self.source_by_channel = {}
+        for pair in os.getenv("HOTELOGIX_SOURCE_BY_CHANNEL", "").split(","):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                self.source_by_channel[k.strip().lower()] = v.strip()
+        self.guest_country_code = os.getenv("HOTELOGIX_GUEST_COUNTRY_CODE", "PH")
+        self.guest_country = os.getenv("HOTELOGIX_GUEST_COUNTRY", "Philippines")
+        self._booking_lock = threading.Lock()  # one booking at a time: the cart belongs to the access key
         self._access_key: str | None = None
         self._access_secret: str | None = None
         self._auth_lock = threading.Lock()
@@ -151,6 +265,10 @@ class HotelogixClient(PMSClient):
             "hotelogix": {"version": "1.0", "datetime": self._utc_now(), "request": request}
         })
         signature = hmac.new(secret.encode(), body.encode(), hashlib.sha1).hexdigest()
+        if self.debug and method != "wsauth":
+            redacted = json.loads(body)
+            redacted["hotelogix"]["request"]["key"] = "***"
+            log.info("Hotelogix %s request: %s", method, json.dumps(redacted)[:4000])
         try:
             r = requests.post(
                 f"{self.base_url}/{method}",
@@ -158,18 +276,26 @@ class HotelogixClient(PMSClient):
                 headers={"Content-Type": "application/json", "X-HAPI-Signature": signature},
                 timeout=20,
             )
-            r.raise_for_status()
-            data = r.json()
-        except (requests.RequestException, ValueError) as e:
+        except requests.RequestException as e:
             raise PMSError(f"Hotelogix {method} request failed: {e}") from e
+        if r.status_code >= 400:
+            # Include Hotelogix's own error text, which explains what it rejected.
+            raise PMSError(f"Hotelogix {method} HTTP {r.status_code}: {r.text[:1000]}")
+        try:
+            data = r.json()
+        except ValueError as e:
+            raise PMSError(f"Hotelogix {method} returned non-JSON: {r.text[:500]}") from e
         if self.debug:
             log.info("Hotelogix %s response: %s", method, json.dumps(data)[:4000])
 
         response = (data.get("hotelogix") or {}).get("response") or {}
         status = response.get("status") or {}
         code = str(status.get("code", "0"))
-        if code not in ("0", "1400"):
-            raise PMSError(f"Hotelogix {method} error {code}: {status.get('message', '')}")
+        message = str(status.get("message", ""))
+        # Each method has its own success code (search 1400, addtocart 1500, savebooking 1600,
+        # confirmbooking 1602, ...), and all of them say "SUCCESS".
+        if code != "0" and message.strip().upper() != "SUCCESS":
+            raise PMSError(f"Hotelogix {method} error {code}: {message}")
         return response
 
     def _authenticate(self) -> None:
@@ -185,9 +311,10 @@ class HotelogixClient(PMSClient):
         self._access_key, self._access_secret = key, secret
         log.info("Hotelogix: new access key obtained")
 
-    def _call(self, method: str, data: dict) -> dict:
-        """Call an API method, getting (or renewing) the access key as needed."""
-        for attempt in (1, 2):
+    def _call(self, method: str, data: dict, retry: bool = True) -> dict:
+        """Call an API method, getting (or renewing) the access key as needed.
+        retry=False is used for booking steps, which must never be sent twice."""
+        for attempt in ((1, 2) if retry else (2,)):
             with self._auth_lock:
                 if not self._access_key:
                     self._authenticate()
@@ -238,19 +365,124 @@ class HotelogixClient(PMSClient):
                         i.get("title", "").strip() for i in rate.get("inclusions") or [] if i.get("title")
                     )
                     rooms_left = rate.get("availableroom", rt.get("availableroom"))
+                    # The rate "title" is often an internal code (e.g. "WEBRB"); the
+                    # description ("Room and breakfast") reads better for guests.
+                    plan = (rate.get("description") or rate.get("title") or "Standard Rate").strip()
+                    # Use only the PMS's own written policy text, never the raw codes.
+                    policies = rate.get("cancellationPolicies") or rate.get("cancellationpolicies") or []
+                    cancellation = " ".join(
+                        p.get("customDescription", "").strip() for p in policies if p.get("customDescription")
+                    )
+                    deposit = (rate.get("bookingpolicy") or {}).get("depositamount")
+                    try:
+                        deposit = round(float(deposit), 2) if deposit is not None else None
+                    except (TypeError, ValueError):
+                        deposit = None
                     offers.append(RoomOffer(
                         room_type=(rt.get("title") or "Room").strip(),
-                        rate_plan=(rate.get("title") or "Standard Rate").strip(),
+                        rate_plan=plan,
                         total_price=round(price + tax, 2),
                         tax=round(tax, 2),
                         currency=currency,
                         rooms_left=int(rooms_left) if str(rooms_left).isdigit() else None,
                         inclusions=inclusions,
-                        # Cancellation terms stay in the Google Doc: the API's policy
-                        # codes are easy to misread, and a wrong promise costs money.
-                        cancellation="",
+                        cancellation=cancellation,
+                        deposit=deposit,
+                        rate_id=str(rate.get("id") or ""),
                     ))
         return [o for o in offers if o.rooms_left != 0]
+
+    def get_hotel_options(self) -> dict:
+        """The property's business sources, market segments, guest types, salespeople,
+        web settings, and night audit date. Used once, to fill in the booking settings."""
+        response = self._call("gethoteloptions", {
+            "businesssource": True, "marketsegment": True, "guesttype": True,
+            "salesperson": True, "webSettings": True,
+        })
+        hotel = (response.get("hotels") or [{}])[0]
+        skip = {"logo", "description", "seasons", "roomtypes"}  # large and not needed here
+        return {k: v for k, v in hotel.items() if k not in skip}
+
+    def _guest_payload(self, guest: Guest) -> dict:
+        return {
+            "fname": {"value": guest.first_name},
+            "lname": {"value": guest.last_name},
+            "email": {"value": guest.email},
+            "mobile": {"value": guest.mobile},
+            "phone": {"value": guest.mobile},
+            "country": {"code": self.guest_country_code, "value": self.guest_country},
+        }
+
+    def create_reservation(self, check_in, check_out, adults, children, room_type, expected_total, guest,
+                           channel=""):
+        """search -> addtocart -> savebooking (ON HOLD), then confirmbooking only if
+        HOTELOGIX_CONFIRM_BOOKINGS=true (payment type OTH, no payment)."""
+        with self._booking_lock:
+            # Fresh login and fresh search, so the rate id and price are current.
+            with self._auth_lock:
+                self._authenticate()
+            offer = _pick_offer(self.search(check_in, check_out, adults, children), room_type)
+            if not offer or not offer.rate_id:
+                raise NotAvailableError(room_type)
+            _check_price(offer, expected_total)
+
+            try:  # remove anything left in this access key's cart
+                self._call("clearcart", {}, retry=False)
+            except PMSError:
+                pass
+
+            cart = self._call("addtocart", {"items": [{"value": offer.rate_id}]}, retry=False)
+            hotel = (cart.get("hotels") or [{}])[0]
+            booking = (hotel.get("bookings") or [{}])[0]
+            stays = booking.get("gueststays") or []
+            if not hotel.get("id") or not booking.get("id") or not stays:
+                raise PMSError("Hotelogix addtocart returned no booking")
+
+            guest_payload = self._guest_payload(guest)
+            # Every guest slot needs guest details: with 2 adults there are 2 slots, and
+            # leaving the second one empty makes savebooking fail with HTTP 500.
+            gueststays = [{"id": s["id"], "guest": guest_payload} for s in stays if s.get("id")]
+            hotel_payload = {
+                "id": hotel["id"],
+                "preference": {"value": "nopreference"},
+                "bookings": {"booking": {"id": booking["id"], "gueststays": gueststays}},
+            }
+            source = self.source_by_channel.get(channel.lower(), self.business_source)
+            for field, value in (("businesssource", source),
+                                 ("marketsegment", self.market_segment),
+                                 ("guesttype", self.guest_type),
+                                 ("salesperson", self.salesperson)):
+                if value:
+                    hotel_payload[field] = {"value": value}
+
+            saved = self._call("savebooking", {
+                "isTemp": {"value": False},
+                "isGroupBooking": {"value": False},
+                "guest": guest_payload,
+                "hotels": [hotel_payload],
+            }, retry=False)
+            order_id, codes = _find_order(saved)
+            if not order_id and not codes:
+                log.warning("savebooking succeeded but no order id was found: %s",
+                            json.dumps(saved, default=str)[:1500])
+
+            status = "ON_HOLD"
+            if CONFIRM_BOOKINGS and order_id:
+                try:
+                    confirmed = self._call("confirmbooking", {
+                        "orderId": {"value": order_id},
+                        "payment": {"type": "OTH", "amount": "0",
+                                    "description": "Reserved via chatbot - no payment collected"},
+                        "errorIfNotConfirm": {"value": 1},
+                    }, retry=False)
+                    status = "CONFIRMED"
+                    codes = _find_order(confirmed)[1] or codes
+                except PMSError:
+                    log.exception("Hotelogix confirmbooking failed for order %s (left on hold)", order_id)
+
+            log.info("Hotelogix reservation %s: order %s, codes %s", status, order_id, codes)
+            return ReservationResult(status, order_id or "", codes, offer.room_type, offer.rate_plan,
+                                     offer.total_price, offer.currency)
 
     def promos(self):
         # The Web API has no separate promo call. Promos and packages come back as
@@ -287,6 +519,13 @@ class CachedPMS(PMSClient):
 
     def promos(self):
         return self._get(("promos",), self.inner.promos)
+
+    def create_reservation(self, *args, **kwargs):
+        try:
+            return self.inner.create_reservation(*args, **kwargs)
+        finally:
+            with self._lock:
+                self._cache.clear()  # availability changed
 
 
 _client: PMSClient | None = None

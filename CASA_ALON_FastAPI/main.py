@@ -76,7 +76,8 @@ class AskRequest(BaseModel):
 
 class AskResponse(BaseModel):
     answer: str
-    handoff: bool          # True: n8n should route to staff or the booking workflow
+    handoff: bool                    # True: n8n should route this to staff
+    reservation: dict | None = None  # set when the bot just created a reservation
 
 
 @app.post("/ask", response_model=AskResponse)

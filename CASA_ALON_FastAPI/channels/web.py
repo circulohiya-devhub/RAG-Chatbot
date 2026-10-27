@@ -133,8 +133,10 @@ async def web_chat(req: ChatRequest, request: Request, background: BackgroundTas
     except Exception:
         raise HTTPException(status_code=503, detail="The assistant is temporarily unavailable")
 
+    msg = IncomingMessage(channel="web", user_id=req.session_id, text=text)
+    if result.get("reservation"):
+        background.add_task(notify_staff, msg, text, result["answer"], "reservation", result["reservation"])
     if result["handoff"]:
-        msg = IncomingMessage(channel="web", user_id=req.session_id, text=text)
         background.add_task(notify_staff, msg, text, result["answer"])
     return result
 

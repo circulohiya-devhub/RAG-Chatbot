@@ -1,6 +1,7 @@
 """
 Channel-independent message handling, shared by every chat channel.
 """
+import json
 import logging
 import os
 import threading
@@ -50,21 +51,26 @@ def _already_seen(key: str) -> bool:
         return False
 
 
-def notify_staff(msg: IncomingMessage, question: str, answer: str) -> None:
-    """Send a handoff alert. Runs for every channel the server handles directly."""
-    log.info("HANDOFF needed: %s", msg.thread_id)
+def notify_staff(msg: IncomingMessage, question: str, answer: str,
+                 event: str = "handoff", reservation: dict | None = None) -> None:
+    """Alert staff: event "handoff" (needs a person) or "reservation" (the bot booked a room)."""
+    log.info("Staff alert (%s): %s", event, msg.thread_id)
     if not STAFF_WEBHOOK_URL:
         return
+    payload = {
+        "event": event,
+        "channel": msg.channel,
+        "user_id": msg.user_id,
+        "user_name": msg.user_name,
+        "question": question,
+        "bot_answer": answer,
+        "reservation": reservation,
+    }
     try:
         requests.post(
             STAFF_WEBHOOK_URL,
-            json={
-                "channel": msg.channel,
-                "user_id": msg.user_id,
-                "user_name": msg.user_name,
-                "question": question,
-                "bot_answer": answer,
-            },
+            data=json.dumps(payload, default=str),
+            headers={"Content-Type": "application/json"},
             timeout=10,
         )
     except requests.RequestException:
@@ -90,5 +96,7 @@ def handle_incoming(msg: IncomingMessage, channel: Channel) -> None:
         return
 
     channel.reply(msg.user_id, result["answer"])
+    if result.get("reservation"):
+        notify_staff(msg, text, result["answer"], event="reservation", reservation=result["reservation"])
     if result["handoff"]:
         notify_staff(msg, text, result["answer"])

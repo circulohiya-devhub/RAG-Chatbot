@@ -64,6 +64,22 @@ The PMS tools are **read-only**. The bot can quote rates but can't create, chang
 
 Identical searches are cached for `PMS_CACHE_SECONDS` (default 5 minutes) to limit API calls.
 
+## Reservations (no payment)
+
+With `BOOKINGS_ENABLED=true`, the bot can reserve one room per reservation directly in the PMS:
+
+1. It checks live rates, then collects the guest's first name, last name, email, and mobile number.
+2. `prepare_reservation` re-checks the price and shows the guest a full summary. Nothing is booked yet.
+3. The guest must reply YES in a **later** message. The code (not the AI) checks this before anything is created.
+4. `confirm_reservation` re-checks the price, then runs Hotelogix `addtocart` → `savebooking` → `confirmbooking` (payment type OTH, no payment).
+5. The guest gets the reservation number, and staff get an alert (`"event": "reservation"`) at `STAFF_WEBHOOK_URL`.
+
+Safeguards: price and availability re-checked twice, one booking at a time (the Hotelogix cart belongs to the access key), no retries on booking steps (so no double bookings), summaries expire after 15 minutes, and a daily limit per guest (`MAX_BOOKINGS_PER_GUEST_PER_DAY`). If confirmation fails after the reservation is saved, it stays on hold in Hotelogix and staff are alerted.
+
+The Hotelogix key needs permission for `addtocart`, `savebooking`, `confirmbooking`, and ideally `clearcart`. A missing permission returns error 3992.
+
+Guest names, emails, and phone numbers pass through Gemini and appear in LangSmith traces. Keep LangSmith access limited to your team.
+
 ## 1. Run locally
 
 ```bash

@@ -1,0 +1,166 @@
+{
+  "isTrialExpired": false,
+  "hotelMode": "PAID",
+  "currentDate": "2026-10-26 16:20:25",
+  "currentNightAuditDate": "2025-05-10",
+  "timeZone": "Asia/Manila",
+  "businesssources": [
+    {
+      "id": "VGhmVFoyVjRmWEE9",
+      "title": "Corporate",
+      "code": "Corp"
+    },
+    {
+      "id": "Y0tpdndmK2hVWlU9",
+      "title": "Facebook",
+      "code": "FB"
+    },
+    {
+      "id": "a0l5Nys2N0traWM9",
+      "title": "Google",
+      "code": "Google"
+    },
+    {
+      "id": "WFBlTVR2WkV2L1U9",
+      "title": "Instagram",
+      "code": "IG"
+    },
+    {
+      "id": "YS92RndGam5FdG89",
+      "title": "Newspaper",
+      "code": "News"
+    },
+    {
+      "id": "U2hzcDFSZFplczg9",
+      "title": "OTA",
+      "code": null
+    },
+    {
+      "id": "M2NIT3BGOHRhT0k9",
+      "title": "Referral",
+      "code": "REF"
+    },
+    {
+      "id": "Mks1SUIveXNhQm89",
+      "title": "Return",
+      "code": "Ret"
+    },
+    {
+      "id": "Qm9Ba2xqZHJJU3c9",
+      "title": "Sales",
+      "code": "SALES"
+    },
+    {
+      "id": "b2VvTkNya2FlR3M9",
+      "title": "Tiktok",
+      "code": "Tiktok"
+    },
+    {
+      "id": "eHBoYitJZzF5STA9",
+      "title": "Travel Agency",
+      "code": "TA"
+    },
+    {
+      "id": "OHNZZDhlUzZBUk09",
+      "title": "Walk-In",
+      "code": null
+    },
+    {
+      "id": "QTlUOEU1Yjd3b1E9",
+      "title": "Website",
+      "code": "Web"
+    }
+  ],
+  "marketsegments": [
+    {
+      "id": "U3V0SzlLWmp5R0E9",
+      "title": "Business",
+      "code": null
+    },
+    {
+      "id": "N21MaE5TNG5BSmM9",
+      "title": "Corporates",
+      "code": null
+    },
+    {
+      "id": "VnFOTm1sUk5GckE9",
+      "title": "Events",
+      "code": null
+    },
+    {
+      "id": "ZWIrYkZyMlV5ZjQ9",
+      "title": "Government/PSU",
+      "code": null
+    },
+    {
+      "id": "dXBZZU1wdXZMbjQ9",
+      "title": "Leisure",
+      "code": null
+    },
+    {
+      "id": "MmN3cWhwMWlkOVk9",
+      "title": "Tour Operators",
+      "code": null
+    },
+    {
+      "id": "c2VxUWdnTkdnQzA9",
+      "title": "Wedding",
+      "code": null
+    }
+  ],
+  "guesttypes": [
+    {
+      "id": "N0pyM0FhemZyTG89",
+      "title": "BB",
+      "code": "BB"
+    },
+    {
+      "id": "dTYyYVZzOGx0cmc9",
+      "title": "Corporate Guest",
+      "code": null
+    },
+    {
+      "id": "ajBOVGxDT1RmQVU9",
+      "title": "FIT",
+      "code": null
+    },
+    {
+      "id": "bm91bVE1ZFRkRUk9",
+      "title": "LOC",
+      "code": "LOC"
+    },
+    {
+      "id": "bitjQUtmcmZKMUk9",
+      "title": "OFW",
+      "code": "OFW"
+    },
+    {
+      "id": "aU1yZnlHRVVBMVU9",
+      "title": "PBT",
+      "code": "PBT"
+    },
+    {
+      "id": "bnRNRDBVMU5KNWc9",
+      "title": "Walk In",
+      "code": null
+    }
+  ],
+  "salepersons": [
+    {
+      "id": "SVhWTVhLUnFwcGM9",
+      "email": "alvinbilog@gmail.com"
+    },
+    {
+      "id": "WnB1cTZqU0phaXM9",
+      "email": "ajsbilog@yahoo.com"
+    },
+    {
+      "id": "US9wMGhESENLa3M9",
+      "email": "bradpitt@gmail.com"
+    },
+    {
+      "id": "U2d0cFVkNkNUeFk9",
+      "email": "rlizlamo79@gmail.com"
+    }
+  ]
+}
